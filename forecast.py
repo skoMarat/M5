@@ -130,7 +130,7 @@ class Forecast:
         return
     
     def VAR():
-            
+        return   
         
             
     

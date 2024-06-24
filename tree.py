@@ -26,10 +26,11 @@ from pandas import to_datetime
 from prophet import Prophet
 from dateutil.relativedelta import relativedelta
 from leaf import *
+from forecast import *
 
 
 class Tree:
-    def __init__(self,  date:str , data_directory:str):
+    def __init__(self, data_directory:str):
         """ 
         A tree object is a collection of leaf objects. 
         OnlyKPI and date is required for
@@ -125,19 +126,21 @@ class Tree:
             mS=np.vstack([mS,create_matrix(vNonZeroEntries)])
  
         self.mS=mS
+        
         self.mP    = None
         self.mW    = None
         self.mYhat = None
+        self.mYhatIS = np.zeros((self.mY.shape[0], self.mY.shape[1]))
         self.mYrec = None 
         
         iIS = len(self.time_index)
-        self.mRes = np.zeros((self.mY.shape[0], self.mY.shape[0]))    # matrix that stores in sample base forecast errors.
+        self.mRes = np.zeros((self.mY.shape[0], self.mY.shape[1]))    # matrix that stores in sample base forecast errors.
 
     def displayMatrix(self, matrix):
         plt.imshow(matrix,cmap='binary', interpolation='nearest')
         plt.show()
                 
-    def getMatrixW(self):
+    def getMatrixW(self , sWeightType:str):
         """
         Purpose:
         Perform estimation using LS
@@ -147,7 +150,6 @@ class Tree:
         """
 
         mRes=self.mRes.T
-        sWeightType=self.sWeightType
         mW = np.eye(mRes.shape[1])
         vNonNanRows = np.setdiff1d(np.arange(0,mRes.shape[0]),  np.unique(np.argwhere(np.isnan(mRes))[:,0]))
         mRes = mRes[vNonNanRows,:]
@@ -186,7 +188,7 @@ class Tree:
         
         self.mW=mW
     
-    def getMatrixP(self):  
+    def getMatrixP(self , sWeigthType: str):  
         """
         Purpose:
             return projection matrix P for a given mS and mW, as per Wickramasuriya et al (2018) equation (9)
@@ -200,7 +202,7 @@ class Tree:
         mS=self.mS
         mW=self.mW
         
-        if self.sRecMeth=='bottom_up':
+        if sWeigthType is None:
             n=mS.shape[1]
             m=mS.shape[0]
             m0=np.full((n,m-n),0, dtype=int)
@@ -221,25 +223,25 @@ class Tree:
         
         if sForecMeth=='Prophet':
             for i in range(self.mY.shape[0]):
-                dfData=pd.DataFrame(data=self.mY[i], index=self.time_index)
-                fc=Forecast(dfData=dfData, iOoS=iOoS)
-                vYhat=fc.Prophet().vYhat[-iOoS:].values
-                self.mYhat[i]=vYhat
+                dfData = pd.DataFrame(data=self.mY[i], index=self.time_index)
+                fc = Forecast(dfData=dfData, iOoS=iOoS)
+                vYhat = fc.Prophet().yhat.values
+                self.mYhat[i] = vYhat[-iOoS:]
+                self.mYhatIS[i] = vYhat[:iOoS]
+            self.mRes=self.mYhatIS-self.mY
+        
+                
 
                          
-    def reconcile(self):
+    def reconcile(self , sRecMeth:str , sWeightType: str):
         """
         Performs whole reconciliation algorithm
-        """    
-        self.getMatrixS()                                   
-        self.getMatrixW()      
-        self.getMatrixP() 
+        """                                  
+        self.getMatrixW(sWeightType)      
+        self.getMatrixP(sWeightType) 
            
         self.mYrec=np.dot(np.dot(self.mS,self.mP),self.mYhat)
-        # self.mYrec1=np.dot(np.dot(self.mS,self.mP),self.mYhat1)
-
-
-        self.distributeYrecToLeafs()
+        
         print('Reconciliation is complete')
         
         

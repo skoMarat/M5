@@ -3,9 +3,9 @@ from importlib import reload
 import numpy as np
 import os
 
-import simulation
-reload(simulation)
-from simulation import *
+# import simulation
+# reload(simulation)
+# from simulation import *
 
 import leaf
 reload(leaf)
@@ -52,18 +52,14 @@ def main():
     
     path=os.getcwd()+f"\\data\\M5\\fdata"
     
+    weight_type =  "diag" # "mint_shrinkage"  "full"  "ols"   "None = bottom up"
+    # forecast_method = 'pick-up' # "Prophet_FPCR"  "Prophet_FPCR_update"   "Prophet_TS" 
+    forecast_method = "Prophet"
+    iOoS=28
     
-    reconciliation_method = 'multi'  # "bottom_up"
-    weight_type =  "diag" # "mint_shrinkage"  "full"  "ols"
-    forecast_method = 'pick-up' # "Prophet_FPCR"  "Prophet_FPCR_update"   "Prophet_TS" 
-    date = "2023-12-01"
-    
-    tree=Tree(KPI='Paxkm', date=date , 
-              sForecMeth=forecast_method,
-              sRecMeth=reconciliation_method,
-              sWeightType=weight_type)
-    tree.forecast()
-    tree.reconcile()
+    tree=Tree( data_directory = path)
+    tree.forecast(sForecMeth=forecast_method , iOoS=iOoS)
+    tree.reconcile( sWeightType=weight_type)
     
     
     
