@@ -26,7 +26,7 @@ from pandas import to_datetime
 from prophet import Prophet
 from dateutil.relativedelta import relativedelta
 from leaf import *
-from forecast import *
+from forecast_prophet import *
 
 
 class Tree:
@@ -49,8 +49,6 @@ class Tree:
            mS: summation matrix, see getMatrixS() for more detail
            mP: projection matrix, see getMatrixP() for more detail
            mW: weight matrix, see getMatrixW() for more detail 
-           mYhat0-mYhat3: matrix storing base forecasts
-           mYrec0-mYrec3: matrix storing reconciled forecasts  
         Methods for Outputs:
            There are several methods that allows user to quickly and efficiently conduct diagnostics of the algorithm results:
             (1) getLeaf() method allows user to specify strings for Level and get the leaf object. 
@@ -60,7 +58,7 @@ class Tree:
              
         """
         #reads data
-        self.data=pd.read_csv(data_directory)
+        self.data=pd.read_csv(data_directory) 
         
         #based on data, find all possible levels and datetime index
         self.levels=self.data.columns[pd.to_datetime(self.data.columns, errors='coerce').isna()]
@@ -69,42 +67,39 @@ class Tree:
         #create a hierarchy list
         df=self.data[self.levels]
         list_of_leafs=df.values.tolist()
+
         
         for level in self.levels[::-1]:
             df[level]=None
             df=df.drop_duplicates()
             list_of_leafs.extend(df.values.tolist())
+    
             
         def sort_key(item):
             none_count = item.count(None)
             return (-none_count, item)
         
         self.list_of_leafs=sorted(list_of_leafs, key=sort_key)
-        
+
         #create tree data matrix mY
-        self.mY=np.zeros( (len(list_of_leafs), len(self.time_index)))
+        self.mY=np.zeros( (len(self.list_of_leafs), len(self.time_index)))
         
-        def subset_data(leaf_list):
+        def subset_data(l:list):
             """
             subsets data to include only data of a certain leaf
             leaf_list (list) list of size n, [0] is the level 0 while [-1] is the lowest level
             
             returns: serried of aggregated values for a given leaf_list
             """
-            column_mask=(self.data[self.levels]==leaf_list).any(axis=0)  #should levels be self.levels?
-            row_mask=(self.data[self.levels]==leaf_list[i]).loc[:,column_mask].all(axis=1)
+            column_mask=(self.data[self.levels]==l).any(axis=0)  
+            row_mask=(self.data[self.levels]==l).loc[:,column_mask].all(axis=1)
             
             srY=self.data[row_mask].drop(columns=self.levels).sum(axis=0)
-            # dfData=srY.to_frame().rename(columns={0: 'y'})
-            # dfData.index=pd.to_datetime(dfData.index)
             return srY
         
-        for i,leaf_creds in enumerate(list_of_leafs):
-            # setattr(self, f"leaf_{i}", Leaf(date=date, 
-            #                                 dfData=subset_data(leaf_creds),
-            #                                 leaf=leaf_creds # list of leaf credentials
-            #                              ))
+        for i,leaf_creds in enumerate(self.list_of_leafs):
             self.mY[i]=subset_data(leaf_creds).values
+
             
         # Get summattion matrix S                              
         m=self.data.shape[0]
@@ -143,7 +138,7 @@ class Tree:
     def getMatrixW(self , sWeightType:str):
         """
         Purpose:
-        Perform estimation using LS
+        create the weights matrix
         
         Outputs:
         mW:            matrix of weights
@@ -213,27 +208,50 @@ class Tree:
             mWinv = np.linalg.inv(mW)
             mP= (np.linalg.inv(mS.T @ (mWinv @ mS)) @ (mS.T @ (mWinv)))
             self.mP=mP  
-        
-            
+                
     def forecast(self, sForecMeth:str , iOoS:int , iPC=None):  #get mYhat
         """
         Performs the forecast algorithm at each leaf
         """  
         self.mYhat=np.zeros((len(self.list_of_leafs),iOoS))
         
+        try:
+            holidays=pd.read_csv(os.getcwd()+f"\\data\\M5\\holidays.csv")
+            holidays=holidays.values.flatten()
+        except: 
+            holidays=None
+            
+        try:
+            changepoints=pd.read_csv(os.getcwd()+f"\\data\\M5\\changepoints.csv")
+            changepoints=changepoints.values.flatten()
+        except: 
+            changepoints=None    
+        
         if sForecMeth=='Prophet':
             for i in range(self.mY.shape[0]):
-                dfData = pd.DataFrame(data=self.mY[i], index=self.time_index)
-                fc = Forecast(dfData=dfData, iOoS=iOoS)
-                vYhat = fc.Prophet().yhat.values
+                dfData = pd.DataFrame(data=self.mY[i], index=self.time_index , columns=['y'])
+                pht = Forecast_Prophet(dfData=dfData, iOoS=iOoS)
+                vYhat = pht.forecast(holidays=holidays, changepoints=changepoints).yhat.values
                 self.mYhat[i] = vYhat[-iOoS:]
-                self.mYhatIS[i] = vYhat[:iOoS]
+                self.mYhatIS[i] = vYhat[:-iOoS]
             self.mRes=self.mYhatIS-self.mY
-        
+        elif sForecMeth=="PCR":
+            for i in range(self.mY.shape[0]):
+                dfData = pd.DataFrame(data=self.mY[i], index=self.time_index , columns=['y'])
+                ### 7 daily curve
+                # so that it is divisible by 7
+                dfData=pd.DataFrame(data=self.mY[i][2:].reshape(int(self.mY[i][2:].shape[0]/7),7).T,
+                                    columns=self.time_index[2:][::7]) # so [2:] that it is divisible by 7
+                #dfData=dfData.astype(int)
                 
+                
+                
+                
+                
+              
 
                          
-    def reconcile(self , sRecMeth:str , sWeightType: str):
+    def reconcile(self , sWeightType: str):
         """
         Performs whole reconciliation algorithm
         """                                  

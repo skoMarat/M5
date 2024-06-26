@@ -10,12 +10,19 @@ import os
 import leaf
 reload(leaf)
 from leaf import *
+
 import fdata
 reload(fdata)
 from  fdata import *
+
 import tree
 reload(tree)
 from tree import *
+
+import forecast_prophet
+reload(forecast_prophet)
+from forecast_prophet import *
+
 import logging
 logging.getLogger('cmdstanpy').setLevel(logging.WARNING)
 
@@ -50,16 +57,32 @@ def main():
     A tree is equipped with plot_errors() method that creates an interactive plot of percentage errors per leaf (reconciled forecasts and base forecasts) 
     """
     
-    path=os.getcwd()+f"\\data\\M5\\fdata"
+    path=os.getcwd()+f"\\data\\M5\\sales_train_validation.csv"  # to data file 
     
-    weight_type =  "diag" # "mint_shrinkage"  "full"  "ols"   "None = bottom up"
-    # forecast_method = 'pick-up' # "Prophet_FPCR"  "Prophet_FPCR_update"   "Prophet_TS" 
+    # weight_type =  "diag"
+    weight_type = "mint_shrinkage" 
+    # weight_type = "full"
+    # weight_type = None #= bottom up"
+    
+    #forecast_method = 'pick-up'
+    #forecast_method =  "Prophet_FPCR" 
+    #forecast_method =  "Prophet_FPCR"
+    #forecast_method =  "VAR" 
     forecast_method = "Prophet"
-    iOoS=28
+    
+    iOoS=28 
     
     tree=Tree( data_directory = path)
-    tree.forecast(sForecMeth=forecast_method , iOoS=iOoS)
-    tree.reconcile( sWeightType=weight_type)
+    tree.forecast( sForecMeth = forecast_method , iOoS=iOoS)
+    tree.reconcile( sWeightType = weight_type)
+    
+    
+    evaluation_path = os.getcwd()+f"\\data\\M5\\sales_train_evaluation.csv"
+    tree_eval=Tree(data_directory=evaluation_path)
+    mYtrue=tree_eval.mY
+    mYhat=tree.mYhat
+    mYrec=tree.mYrec
+    
     
     
     

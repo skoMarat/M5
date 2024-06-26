@@ -42,7 +42,7 @@ using that same data and compare. We dont want to run the whole process again ju
 
 """
 
-class Forecast:
+class Forecast_Prophet:
     def __init__(self, dfData: pd.DataFrame, iOoS:int , lX=None ):
         """
         dfData          : dataframe with column y to forecast
@@ -52,17 +52,17 @@ class Forecast:
         """
         self.dfData=dfData    # data , [0] to be forecasted, index must be datetime index 
         self.iOoS=iOoS  # number of OoS forecast to generate in the same granularity as srY
-        self.srYhat     # forecasted series TODO
+        self.srYhat=None     # forecasted series TODO
 
         
-    def Prophet(self, 
-                dfX=None,
+    def forecast(self, 
+                dfX=None, #TODO
                 scaling="absmax",
                 holidays=None,
                 changepoints=None,
-                changepoint_prior_scale=0.05,
-                holidays_prior_scale=0.9,
-                yearly_seasonality=20):
+                changepoint_prior_scale=0.05,  # TODO
+                holidays_prior_scale=0.9,      # TODO
+                yearly_seasonality=20) :       # TODO
         """
         Fit Prophet model for daily (or monthly data? TODO)
         regressor self.x must be known also for OoS forecast part. Use other method otherwise
@@ -122,15 +122,6 @@ class Forecast:
         return dfModel
     
     
-    def AR():
-        return    
-        
-        
-    def FPCR():
-        return
-    
-    def VAR():
-        return   
         
             
     
