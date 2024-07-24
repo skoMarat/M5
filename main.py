@@ -72,8 +72,8 @@ def main():
     
     iOoS=28 
     
-    tree=Tree( data_directory = path)
-    tree.forecast( sForecMeth = forecast_method , iOoS=iOoS)
+    tree=Tree( data_directory = path , type='spatial' , construct=)
+    tree.forecast( sForecMeth = forecast_method , iOoS=iOoS )
     tree.reconcile( sWeightType = weight_type)
     
     

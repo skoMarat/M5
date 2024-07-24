@@ -61,46 +61,76 @@ class Tree:
         self.data=pd.read_csv(data_directory) 
         
         #based on data, find all possible levels and datetime index
-        self.levels=self.data.columns[pd.to_datetime(self.data.columns, errors='coerce').isna()]
-        self.time_index=pd.to_datetime(self.data.drop(columns=self.levels).columns)
-        
-        #create a hierarchy list
-        df=self.data[self.levels]
-        list_of_leafs=df.values.tolist()
+        if type=='spatial':
+            self.levels=self.data.columns[pd.to_datetime(self.data.columns, errors='coerce').isna()]
+            self.date_time_index=pd.to_datetime(self.data.drop(columns=self.levels).columns)
+            
+            #create a hierarchy list
+            df=self.data[self.levels]
+            list_of_leafs=df.values.tolist()  
+            
+            for level in self.levels[::-1]:
+                df[level]=None
+                df=df.drop_duplicates()
+                list_of_leafs.extend(df.values.tolist())
 
+            def sort_key(item):
+                none_count = item.count(None)
+                return (-none_count, item)
         
-        for level in self.levels[::-1]:
-            df[level]=None
-            df=df.drop_duplicates()
-            list_of_leafs.extend(df.values.tolist())
+            self.list_of_leafs=sorted(list_of_leafs, key=sort_key)
+            
+            #create tree data matrix mY
+            self.mY=np.zeros( (len(self.list_of_leafs), len(self.date_time_index)))
+            
+            def subset_data(l:list):
+                """
+                subsets data to include only data of a certain leaf
+                leaf_list (list)  size n, [0] is the level 0 while [-1] is the lowest level
+                
+                returns: serried of aggregated values for a given leaf_list
+                """
+                column_mask=(self.data[self.levels]==l).any(axis=0)  
+                row_mask=(self.data[self.levels]==l).loc[:,column_mask].all(axis=1)
+                
+                srY=self.data[row_mask].drop(columns=self.levels).sum(axis=0)
+                return srY
+            
+            for i,leaf_creds in enumerate(self.list_of_leafs):
+                self.mY[i]=subset_data(leaf_creds).values
+              
+        elif type=='temporal':
+            #data will be a series not dataframe
+            self.levels=['T','H','D','W','M','Q','A']
+            dictLevels={'T': 60 , 'H' :24 , 'D': 7 , 'W':1, 'M': 3 , 'Q':4 , 'A': 1}
+            
+            start_index = self.levels.index(self.data.index.inferred_freq) #the bottom frequency, the freq of data
+            end_index = 3 if start_index<3 else 6      
+            self.levels=self.levels[start_index:end_index + 1]   
+            
+            #make sure series is summable :  full weeks, full years etc #TODO only worrks for D W now
+            start_index = self.data[self.data.index.weekday == 6].index[0]
+            end_index = self.data[self.data.index.weekday==6].index[-1]
+            self.data=self.data[start_index:end_index]
+            
+            #create and populate mY
+            aArray=np.array([])
+            n=1
+            for sFreq in reversed(self.levels):
+                n=dictLevels[sFreq]*n
+                aArray=np.append(aArray,int(n))
+                
+            aArray=aArray[::-1]    
+            n=int(aArray.sum())
+            m=self.data.resample(self.levels[-1]).sum().shape[0]
+
+            mY=self.data.values.reshape( (  m , int(aArray[0]) )).T
+            for i,sFreq in enumerate(self.levels[1:]):
+                df=self.data.resample(sFreq).sum()
+                mY=np.vstack((df.values.reshape(( m ,int(aArray[i+1]))).T , mY))
+            
+
     
-            
-        def sort_key(item):
-            none_count = item.count(None)
-            return (-none_count, item)
-        
-        self.list_of_leafs=sorted(list_of_leafs, key=sort_key)
-
-        #create tree data matrix mY
-        self.mY=np.zeros( (len(self.list_of_leafs), len(self.time_index)))
-        
-        def subset_data(l:list):
-            """
-            subsets data to include only data of a certain leaf
-            leaf_list (list) list of size n, [0] is the level 0 while [-1] is the lowest level
-            
-            returns: serried of aggregated values for a given leaf_list
-            """
-            column_mask=(self.data[self.levels]==l).any(axis=0)  
-            row_mask=(self.data[self.levels]==l).loc[:,column_mask].all(axis=1)
-            
-            srY=self.data[row_mask].drop(columns=self.levels).sum(axis=0)
-            return srY
-        
-        for i,leaf_creds in enumerate(self.list_of_leafs):
-            self.mY[i]=subset_data(leaf_creds).values
-
-            
         # Get summattion matrix S                              
         m=self.data.shape[0]
         mS=np.ones((1,m))
@@ -128,12 +158,15 @@ class Tree:
         self.mYhatIS = np.zeros((self.mY.shape[0], self.mY.shape[1]))
         self.mYrec = None 
         
-        iIS = len(self.time_index)
+        iIS = len(self.date_time_index)
         self.mRes = np.zeros((self.mY.shape[0], self.mY.shape[1]))    # matrix that stores in sample base forecast errors.
 
+
+############################
     def displayMatrix(self, matrix):
         plt.imshow(matrix,cmap='binary', interpolation='nearest')
         plt.show()
+############################        
                 
     def getMatrixW(self , sWeightType:str):
         """
@@ -209,7 +242,7 @@ class Tree:
             mP= (np.linalg.inv(mS.T @ (mWinv @ mS)) @ (mS.T @ (mWinv)))
             self.mP=mP  
                 
-    def forecast(self, sForecMeth:str , iOoS:int , iPC=None):  #get mYhat
+    def forecast(self, sForecMeth:str , iOoS:int , temporal:bool, iPC=None ):  #get mYhat
         """
         Performs the forecast algorithm at each leaf
         """  
@@ -227,23 +260,30 @@ class Tree:
         except: 
             changepoints=None    
         
-        if sForecMeth=='Prophet':
-            for i in range(self.mY.shape[0]):
-                dfData = pd.DataFrame(data=self.mY[i], index=self.time_index , columns=['y'])
-                pht = Forecast_Prophet(dfData=dfData, iOoS=iOoS)
-                vYhat = pht.forecast(holidays=holidays, changepoints=changepoints).yhat.values
-                self.mYhat[i] = vYhat[-iOoS:]
-                self.mYhatIS[i] = vYhat[:-iOoS]
-            self.mRes=self.mYhatIS-self.mY
-        elif sForecMeth=="PCR":
-            for i in range(self.mY.shape[0]):
-                dfData = pd.DataFrame(data=self.mY[i], index=self.time_index , columns=['y'])
-                ### 7 daily curve
-                # so that it is divisible by 7
-                dfData=pd.DataFrame(data=self.mY[i][2:].reshape(int(self.mY[i][2:].shape[0]/7),7).T,
-                                    columns=self.time_index[2:][::7]) # so [2:] that it is divisible by 7
-                #dfData=dfData.astype(int)
-                
+        for i in range(self.mY.shape[0]):
+            dfData = pd.DataFrame(data=self.mY[i], index=self.date_time_index , columns=['y'])
+            
+            if temporal is False:
+                if sForecMeth=='Prophet':      
+                    if temporal is False:
+                        pht = Forecast_Prophet(dfData=dfData, iOoS=iOoS)
+                        vYhat = pht.forecast(holidays=holidays, changepoints=changepoints).yhat.values
+                        self.mYhat[i] = vYhat[-iOoS:]
+                        self.mYhatIS[i] = vYhat[:-iOoS]
+                    else:
+                        sFreq=dfData.index.inferred_freq
+                            
+                        
+                # elif sForecMeth=="PCR":
+                #     ### 7 daily curve
+                #     # so that it is divisible by 7
+                #     dfData=pd.DataFrame(data=self.mY[i][2:].reshape(int(self.mY[i][2:].shape[0]/7),7).T,
+                #                         columns=self.time_index[2:][::7]) # so [2:] that it is divisible by 7
+                #     #dfData=dfData.astype(int)
+        
+                  
+              
+        self.mRes=self.mYhatIS-self.mY    
                 
                 
                 
