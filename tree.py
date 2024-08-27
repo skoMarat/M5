@@ -30,7 +30,7 @@ from forecast_prophet import *
 
 
 class Tree:
-    def __init__(self, data_directory:str):
+    def __init__(self, data_directory:str , type: str):
         """ 
         A tree object is a collection of leaf objects. 
         OnlyKPI and date is required for
@@ -59,6 +59,7 @@ class Tree:
         """
         #reads data
         self.data=pd.read_csv(data_directory) 
+        self.type=type
         
         #based on data, find all possible levels and datetime index
         if type=='spatial':
@@ -81,92 +82,117 @@ class Tree:
             self.list_of_leafs=sorted(list_of_leafs, key=sort_key)
             
             #create tree data matrix mY
-            self.mY=np.zeros( (len(self.list_of_leafs), len(self.date_time_index)))
-            
-            def subset_data(l:list):
-                """
-                subsets data to include only data of a certain leaf
-                leaf_list (list)  size n, [0] is the level 0 while [-1] is the lowest level
-                
-                returns: serried of aggregated values for a given leaf_list
-                """
-                column_mask=(self.data[self.levels]==l).any(axis=0)  
-                row_mask=(self.data[self.levels]==l).loc[:,column_mask].all(axis=1)
-                
-                srY=self.data[row_mask].drop(columns=self.levels).sum(axis=0)
-                return srY
+            mY=np.zeros( (len(self.list_of_leafs), len(self.date_time_index)))
             
             for i,leaf_creds in enumerate(self.list_of_leafs):
-                self.mY[i]=subset_data(leaf_creds).values
-              
-        elif type=='temporal':
-            #data will be a series not dataframe
-            self.levels=['T','H','D','W','M','Q','A']
-            dictLevels={'T': 60 , 'H' :24 , 'D': 7 , 'W':1, 'M': 3 , 'Q':4 , 'A': 1}
+                mY[i]=self.subset_data(leaf_creds).values
             
-            start_index = self.levels.index(self.data.index.inferred_freq) #the bottom frequency, the freq of data
-            end_index = 3 if start_index<3 else 6      
-            self.levels=self.levels[start_index:end_index + 1]   
+            # Get summattion matrix S                              
+            mS=np.ones((1,self.data.shape[0])) # start with 1 row at the top of matrix s that is always a vector of ones of size equal to # of bottom level series
             
-            #make sure series is summable :  full weeks, full years etc #TODO only worrks for D W now
-            start_index = self.data[self.data.index.weekday == 6].index[0]
-            end_index = self.data[self.data.index.weekday==6].index[-1]
-            self.data=self.data[start_index:end_index]
+            for i,level in enumerate(self.levels.to_list()):
+                groupByColumns=self.levels.to_list()[:i+1]
+                vBtmLevelSeries=self.data.groupby(groupByColumns).count().iloc[:,0].values
+                mS=np.vstack([mS,self.create_matrix_S(vBtmLevelSeries)])  
+                     
+        # elif type=='temporal':
+        #     #data will be a series not dataframe
+        #     levels=['T','H','D','W','M','Q','A']
+        #     dLevels={'T': 60 , 'H' :24 , 'D': 7 , 'W':1, 'M': 3 , 'Q':4 , 'A': 1}
             
-            #create and populate mY
-            aArray=np.array([])
-            n=1
-            for sFreq in reversed(self.levels):
-                n=dictLevels[sFreq]*n
-                aArray=np.append(aArray,int(n))
-                
-            aArray=aArray[::-1]    
-            n=int(aArray.sum())
-            m=self.data.resample(self.levels[-1]).sum().shape[0]
+        #     start_index = levels.index(self.data.index.inferred_freq) #the bottom frequency, the freq of data
+        #     end_index = 3 if start_index<3 else 6      
+        #     self.levels=levels[start_index:end_index + 1]   
+            
+        #     #make sure series is summable :  full weeks, full years etc #TODO only works for D W now
+        #     start_index = self.data[self.data.index.weekday == 6].index[0]
+        #     end_index = self.data[self.data.index.weekday==6].index[-1]
+        #     self.data=self.data[start_index:end_index]
+            
+        #     #create and populate mY
+        #     levels=['T','H','D','W','M','Q','A']
+        #     dLevels={'T': 60 , 'H' :24 , 'D': 7 , 'W':1, 'M': 3 , 'Q':4 , 'A': 1}
 
-            mY=self.data.values.reshape( (  m , int(aArray[0]) )).T
-            for i,sFreq in enumerate(self.levels[1:]):
-                df=self.data.resample(sFreq).sum()
-                mY=np.vstack((df.values.reshape(( m ,int(aArray[i+1]))).T , mY))
-            
+        #     start_index = levels.index(self.data.index.inferred_freq) #the bottom frequency, the freq of data
+        #     end_index = 3 if start_index<3 else 6      
+        #     levels=levels[start_index:end_index + 1] 
 
-    
-        # Get summattion matrix S                              
-        m=self.data.shape[0]
-        mS=np.ones((1,m))
+        #     if end_index==3: # works only for W and M data currently
+        #         start_index = self.data[self.data.index.weekday == 0].index[0]
+        #         end_index = self.data[self.data.index.weekday==6].index[-1]
+        #     else:
+        #         start_index = self.data[self.data.index.month == 1].index[0]
+        #         end_index = self.data[self.data.index.month==12].index[-1]
 
-        def create_matrix(lengths):
-            total_columns = sum(lengths)
-            matrix = np.zeros((len(lengths), total_columns), dtype=int)
-            
-            start_index = 0
-            for i, length in enumerate(lengths):
-                matrix[i, start_index:start_index + length] = 1
-                start_index += length
-            
-            return matrix
+        #     df=self.data[start_index:end_index]
 
-        for i,level in enumerate(self.levels.to_list()):
-            vNonZeroEntries=self.data.groupby(self.levels.to_list()[:i+1]).count().iloc[:,0].values
-            mS=np.vstack([mS,create_matrix(vNonZeroEntries)])
- 
-        self.mS=mS
-        
+        #     #create and populate mY
+        #     aUnits=np.array([])
+        #     n=1
+        #     for sFreq in reversed(levels):
+        #         n=dLevels[sFreq]*n
+        #         aUnits=np.append(aUnits,int(n))
+        #     self.aUnits=aUnits[::-1].astype(int)    
+        #     n=int(aUnits.sum())
+        #     m=df.resample(levels[-1]).sum().shape[0]
+
+
+        #     mY=df.values.reshape( ( m , aUnits[0] )).T
+        #     mS=self.create_matrix([aUnits[0]])
+        #     for i,sFreq in enumerate(levels[1:]):
+        #         df=df.resample(sFreq).sum()
+        #         n = aUnits[i+1]
+        #         mY_=df.values.reshape(( m ,n)).T 
+        #         mY=np.vstack((mY_, mY))
+  
+        #         vBtmLevelSeries=np.full(aUnits[-i-2],int(aUnits[0]/aUnits[-i-2]))
+        #         mS_=self.create_matrix(vBtmLevelSeries)
+        #         mS=np.vstack(( mS, mS_ ))
+                      
+        self.mY = mY
+        self.mS = mS          
         self.mP    = None
         self.mW    = None
         self.mYhat = None
         self.mYhatIS = np.zeros((self.mY.shape[0], self.mY.shape[1]))
-        self.mYrec = None 
-        
-        iIS = len(self.date_time_index)
+        self.mYtilde = None 
         self.mRes = np.zeros((self.mY.shape[0], self.mY.shape[1]))    # matrix that stores in sample base forecast errors.
 
 
-############################
+
     def displayMatrix(self, matrix):
         plt.imshow(matrix,cmap='binary', interpolation='nearest')
-        plt.show()
-############################        
+        plt.show()  
+
+    def subset_data(self,l:list):
+        """
+        subsets data to include only data of a certain leaf
+        leaf_list (list)  size n, [0] is the level 0 while [-1] is the lowest level
+        
+        returns: serried of aggregated values for a given leaf_list
+        """
+        column_mask=(self.data[self.levels]==l).any(axis=0)  
+        row_mask=(self.data[self.levels]==l).loc[:,column_mask].all(axis=1)
+        
+        srY=self.data[row_mask].drop(columns=self.levels).sum(axis=0)
+        return srY 
+
+    def create_matrix_S(self, list_of_lengths):
+        """
+        Creates a matrix with cascading binary entries. 
+        list_of_lengths: number of 1's in each row
+        number of rows in resulting matrix is equal to number of int in list_of_lengths
+         
+        """
+        total_columns = sum(list_of_lengths)
+        matrix = np.zeros((len(list_of_lengths), total_columns), dtype=int)
+        
+        start_index = 0
+        for i, length in enumerate(list_of_lengths):
+            matrix[i, start_index:start_index + length] = 1
+            start_index += length
+        
+        return matrix     
                 
     def getMatrixW(self , sWeightType:str):
         """
@@ -184,7 +210,7 @@ class Tree:
         
         if sWeightType == 'diag':  #WLS
             for i in range(mRes.shape[1]):
-                mW[i,i] = np.mean(mRes[:,i]**2)
+                mW[i,i] = np.mean(mRes[:,i]**2)   
         
         elif sWeightType == 'full':  # full
             mW = mRes.T @ mRes / mRes.shape[0]
@@ -230,24 +256,41 @@ class Tree:
         mS=self.mS
         mW=self.mW
         
-        if sWeigthType is None:
+        if sWeigthType == 'bottom_up':
             n=mS.shape[1]
             m=mS.shape[0]
             m0=np.full((n,m-n),0, dtype=int)
             mI=np.eye(n)
             mP=np.hstack((m0,mI))
             self.mP=mP
+        elif 'top_down' in sWeigthType:
+            n=mS.shape[1]
+            m=mS.shape[0]
+            m0=np.full((n,m-1),0, dtype=int)
+            iB= len([sublist for sublist in self.list_of_leafs if sublist.count(None) == 0])# integer length of bottom level
+            if sWeigthType=='top_down_hp': #historical proportions
+                #TODO 70 dynamic
+                vP = np.mean((self.mY[-iB:]/self.mY[0,:]),axis=1)
+            elif sWeigthType=='top_down_ph': #proportions of the historical averages
+                vP = np.mean(self.mY[-iB:],axis=1)/np.mean(self.mY[0,:],axis=0)
+            # elif sWeigthType=='top_down_fp': #forecast proportions
+            #     vP = 
+            vP=vP.reshape((iB,1))
+            mP=np.hstack((vP,m0))
+            self.mP=mP    
         else:
             mWinv = np.linalg.inv(mW)
             mP= (np.linalg.inv(mS.T @ (mWinv @ mS)) @ (mS.T @ (mWinv)))
             self.mP=mP  
                 
-    def forecast(self, sForecMeth:str , iOoS:int , temporal:bool, iPC=None ):  #get mYhat
+    def forecast(self, sForecMeth:str , iOoS:int):  #get mYhat
         """
         Performs the forecast algorithm at each leaf
-        """  
-        self.mYhat=np.zeros((len(self.list_of_leafs),iOoS))
+        iOoS: of bottom level series
         
+        """  
+        # if self.mYhat is not None:
+        #     return
         try:
             holidays=pd.read_csv(os.getcwd()+f"\\data\\M5\\holidays.csv")
             holidays=holidays.values.flatten()
@@ -260,20 +303,29 @@ class Tree:
         except: 
             changepoints=None    
         
-        for i in range(self.mY.shape[0]):
-            dfData = pd.DataFrame(data=self.mY[i], index=self.date_time_index , columns=['y'])
+        if self.type=='temporal': #then it is temporal reconciliation
+            vYhat=np.array([])
+            multiple=int(iOoS/self.aUnits[0])
+            for i,sFreq in enumerate(self.levels):  # starts from bottom
+                dfData=self.data.resample(sFreq).sum()
+                if sForecMeth=="Prophet":
+                    pht=Forecast_Prophet(dfData=dfData, iOoS=(self.aUnits*multiple)[i])
+                    vYhat_ = pht.forecast(holidays=holidays, changepoints=changepoints).yhat.values
+                vYhat=np.concatenate((vYhat_, vYhat)) 
+            self.mYhat=vYhat    
+                
+        else:
+            self.mYhat=np.zeros((len(self.list_of_leafs),iOoS))
             
-            if temporal is False:
+            for i in range(self.mY.shape[0]):
+                dfData = pd.DataFrame(data=self.mY[i] , index=self.date_time_index , columns=['y'])           
+                
                 if sForecMeth=='Prophet':      
-                    if temporal is False:
-                        pht = Forecast_Prophet(dfData=dfData, iOoS=iOoS)
-                        vYhat = pht.forecast(holidays=holidays, changepoints=changepoints).yhat.values
-                        self.mYhat[i] = vYhat[-iOoS:]
-                        self.mYhatIS[i] = vYhat[:-iOoS]
-                    else:
-                        sFreq=dfData.index.inferred_freq
+                    pht = Forecast_Prophet(dfData=dfData, iOoS=iOoS)
+                    vYhat = pht.forecast(holidays=holidays, changepoints=changepoints).yhat.values
+                    self.mYhat[i] = vYhat[-iOoS:]
+                    self.mYhatIS[i] = vYhat[:-iOoS]                                
                             
-                        
                 # elif sForecMeth=="PCR":
                 #     ### 7 daily curve
                 #     # so that it is divisible by 7
@@ -281,24 +333,17 @@ class Tree:
                 #                         columns=self.time_index[2:][::7]) # so [2:] that it is divisible by 7
                 #     #dfData=dfData.astype(int)
         
-                  
-              
+                        
         self.mRes=self.mYhatIS-self.mY    
                 
-                
-                
-                
-              
-
                          
     def reconcile(self , sWeightType: str):
         """
         Performs whole reconciliation algorithm
         """                                  
         self.getMatrixW(sWeightType)      
-        self.getMatrixP(sWeightType) 
-           
-        self.mYrec=np.dot(np.dot(self.mS,self.mP),self.mYhat)
+        self.getMatrixP(sWeightType)            
+        self.mYtilde=np.dot(np.dot(self.mS,self.mP),self.mYhat)
         
         print('Reconciliation is complete')
         

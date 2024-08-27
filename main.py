@@ -24,8 +24,7 @@ reload(forecast_prophet)
 from forecast_prophet import *
 
 import logging
-logging.getLogger('cmdstanpy').setLevel(logging.WARNING)
-
+logging.getLogger('cmdstanpy').addHandler(logging.NullHandler())
 
 def main():
     """
@@ -59,10 +58,12 @@ def main():
     
     path=os.getcwd()+f"\\data\\M5\\sales_train_validation.csv"  # to data file 
     
-    # weight_type =  "diag"
-    weight_type = "mint_shrinkage" 
-    # weight_type = "full"
-    # weight_type = None #= bottom up"
+    weight_type =  "diag"
+    weight_type = "mint_shrink" 
+    weight_type = "full"
+    weight_type = "bottom_up"
+    weight_type = "top_down_hp"
+    weight_type = "top_down_ph"
     
     #forecast_method = 'pick-up'
     #forecast_method =  "Prophet_FPCR" 
@@ -70,21 +71,108 @@ def main():
     #forecast_method =  "VAR" 
     forecast_method = "Prophet"
     
-    iOoS=28 
+    iOoS=28  # at the bottom forecast frequency if temporal
     
-    tree=Tree( data_directory = path , type='spatial' , construct=)
+    tree=Tree( data_directory = path , type='spatial')
     tree.forecast( sForecMeth = forecast_method , iOoS=iOoS )
     tree.reconcile( sWeightType = weight_type)
     
     
     evaluation_path = os.getcwd()+f"\\data\\M5\\sales_train_evaluation.csv"
-    tree_eval=Tree(data_directory=evaluation_path)
+    tree_eval=Tree(data_directory=evaluation_path, type='spatial')
     mYtrue=tree_eval.mY
     mYhat=tree.mYhat
-    mYrec=tree.mYrec
+    mYtilde=tree.mYtilde
+    
+    #evaluation   
+    
+    vMAEhat=np.sum(np.abs(mYhat-mYtrue),axis=1)/mYtrue.shape[1]
+    vMAEtilde=np.sum(np.abs(mYtilde-mYtrue),axis=1)/mYtrue.shape[1]
+    
+    plt.plot(vMAEhat-vMAEtilde, label='hat-tilde')
+    plt.legend()
+    plt.axhline(y=0, color='r')
+    plt.show()
+    #if positive, then reconciliation made it beter , how can reconciliation make
+    # it worse? How can we learn?
+
     
     
     
+    
+def compare():
+    
+    #bottom_up
+    tree=Tree( data_directory = os.getcwd()+f"\\data\\M5\\sales_train_validation.csv" , type='spatial')
+    tree.forecast( sForecMeth = "Prophet" , iOoS=28 )
+    tree.reconcile( sWeightType = 'bottom_up')
+    #true 
+    evaluation_path = os.getcwd()+f"\\data\\M5\\sales_train_evaluation.csv"
+    tree_eval=Tree(data_directory=evaluation_path, type='spatial')
+    mYtrue=tree_eval.mY
+    #get true,hat and tilde matrices
+    mYtrue=tree_eval.mY
+    mYhat=tree.mYhat
+    mYtilde=tree.mYtilde
+    
+    #calculate MAE for bu
+    vMAEhat=np.sum(np.abs(mYhat-mYtrue),axis=1)/mYtrue.shape[1]
+    vMPEhat=np.sum((mYhat-mYtrue)/mYtrue*100,axis=1)/mYtrue.shape[1]
+    vMAEtilde_bu=np.sum(np.abs(mYtilde-mYtrue),axis=1)/mYtrue.shape[1]
+    # vMPEtilde_bu=np.sum((mYtilde-mYtrue)/mYtrue*100,axis=1)/mYtrue.shape[1]
+
+    
+    
+    for sWeightType in ['bottom_up','top_down_hp','top_down_ph', 'diag','full','mint_shrink']:
+        print("---------------"+ sWeightType+"-----------------")
+        tree.reconcile( sWeightType = sWeightType)
+        mYtilde=tree.mYtilde
+        vMAEtilde=np.sum(np.abs(mYtilde-mYtrue),axis=1)/mYtrue.shape[1]
+        vMPEtilde=np.sum((mYtilde-mYtrue)/mYtrue*100,axis=1)/mYtrue.shape[1]
+        
+        plt.plot(vMPEtilde, label=sWeightType)
+        plt.title("MPE " + sWeightType)
+        plt.legend()
+        plt.axhline(y=0, color='r')
+        plt.show()
+        
+
+        vRelMAE_hat=vMAEtilde/vMAEhat
+        # vRelMPE_hat=vMPEtilde/vMPEhat
+        AvgRelMAE_hat=np.sum(vRelMAE_hat)/len(vRelMAE_hat)
+        # AvgRelMPE_hat=np.sum(vRelMPE_hat)/len(vRelMPE_hat)
+        print("ARMAE_hat = " + str(AvgRelMAE_hat))
+        # print("ARMPE_hat = " + str(AvgRelMPE_hat))
+        
+        plt.plot(vMPEhat-vMPEtilde, label=sWeightType)
+        plt.title("MPE difference, base and reconciled forecasts ")
+        plt.legend()
+        plt.axhline(y=0, color='r')
+        plt.show()
+        
+        vRelMAE=vMAEtilde/vMAEtilde_bu
+        # vRelMPE=vMPEtilde/vMPEtilde_bu
+        AvgRelMAE=np.sum(vRelMAE)/len(vRelMAE)
+        # AvgRelMPE=np.sum(vRelMPE)/len(vRelMPE)
+        print("ARMAE = " + str(AvgRelMAE))
+        # print("ARMPE = " + str(AvgRelMPE))
+         
+        plt.title(sWeightType +' P matrix')
+        tree.displayMatrix(tree.mP)
+        plt.show()
+       
+        
+        
+        
+        
+        
+    
+    i=100
+    plt.plot(mYtilde[i,:],label='tilde')
+    plt.plot(mYhat[i,:],label='hat')
+    plt.plot(mYtrue[i,:],label='True')
+    plt.legend()    
+                
     
     
 if __name__ == "__main__":

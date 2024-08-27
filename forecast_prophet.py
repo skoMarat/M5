@@ -19,14 +19,14 @@ pd.set_option('display.float_format', lambda x: '{:.2f}'.format(x))
 import statsmodels.api as sm
 import warnings
 from statsmodels.tools.sm_exceptions import ConvergenceWarning
-warnings.filterwarnings("ignore", category=ConvergenceWarning)
-warnings.filterwarnings("ignore", category=UserWarning)
+import logging
+cmdstanpy_logger = logging.getLogger("cmdstanpy")
+cmdstanpy_logger.disabled = True
 from pmdarima.arima import auto_arima
 from pandas import to_datetime
 from prophet import Prophet
 import logging
 import cmdstanpy
-logging.getLogger('cmdstanpy').setLevel(logging.WARNING)
 from dateutil.relativedelta import relativedelta
 import  skfda
 from skfda.preprocessing.dim_reduction import FPCA
@@ -98,6 +98,8 @@ class Forecast_Prophet:
                                 })
                 holiday_dfs.append(h)
             df_holidays=pd.concat(holiday_dfs, ignore_index=True)
+        else:
+            df_holidays=None
                    
         model=Prophet(holidays=df_holidays , 
                       scaling=scaling ,

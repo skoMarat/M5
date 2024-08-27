@@ -58,7 +58,7 @@ class Leaf:
         # self.L3=L3
         # self.L4=L4
         
-        self.data_location=data_location
+        # self.data_location=data_location
         self.date=date
         
         self.raw_data=self.get_smooth_data()  # gets all raw_data also oos if in training mode
